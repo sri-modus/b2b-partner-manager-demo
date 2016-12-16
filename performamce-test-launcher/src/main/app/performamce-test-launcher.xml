@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:anypoint-mq="http://www.mulesoft.org/schema/mule/anypoint-mq" xmlns:dw="http://www.mulesoft.org/schema/mule/ee/dw" xmlns:vm="http://www.mulesoft.org/schema/mule/vm" xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns:metadata="http://www.mulesoft.org/schema/mule/metadata" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans" 
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/objectstore http://www.mulesoft.org/schema/mule/objectstore/current/mule-objectstore.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd
+http://www.mulesoft.org/schema/mule/vm http://www.mulesoft.org/schema/mule/vm/current/mule-vm.xsd
+http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/dw.xsd
+http://www.mulesoft.org/schema/mule/anypoint-mq http://www.mulesoft.org/schema/mule/anypoint-mq/current/mule-anypoint-mq.xsd">
+    
+     <spring:beans>
+        <spring:bean id="myListableObjectStore" class="org.mule.util.store.SimpleMemoryObjectStore"/>
+    </spring:beans>
+    <asynchronous-processing-strategy name="Asynchronous_Processing_Strategy" maxThreads="4" minThreads="1" doc:name="Asynchronous Processing Strategy"/>
+    <queued-asynchronous-processing-strategy name="Queued_Asynchronous_Processing_Strategy" maxThreads="20" minThreads="10" doc:name="Queued Asynchronous Processing Strategy"/>
+    <queued-asynchronous-processing-strategy name="Queued_Asynchronous_Processing_Strategy_launcher" maxThreads="20" minThreads="10" threadTTL="10" doc:name="Queued Asynchronous Processing Strategy"/>
+    <anypoint-mq:config name="Anypoint_MQ_Configuration" doc:name="Anypoint MQ Configuration">
+        <anypoint-mq:provider url="https://mq-us-east-1.anypoint.mulesoft.com/api/v1" clientId="437e82ef65964ee3852e528176791225" clientSecret="bdf69e277e3641cbBDD0368892B64CC3"/>
+    </anypoint-mq:config>
+    <http:listener-config name="HTTP_Listener_Configuration" host="0.0.0.0" port="8081" doc:name="HTTP Listener Configuration"/>
+    <flow name="sendto-receive-flow">
+
+        <logger level="INFO" doc:name="Logger" message="#['received from queue1 at '+server.dateTime]"/>
+        <copy-properties propertyName="*" doc:name="Property"/>
+        <set-property propertyName="counter" value="#[message.outboundProperties.'counter'==null?0:message.outboundProperties.'counter'+1]" doc:name="Property"/>
+        <object-to-string-transformer doc:name="Object to String"/>
+        <choice doc:name="Choice">
+            <when expression="#[message.inboundProperties.'retrycount'&gt;message.outboundProperties.'counter']">
+
+                <logger message="#['count is:']#[message.outboundProperties.'counter']" level="INFO" doc:name="Logger"/>
+                <anypoint-mq:publish config-ref="Anypoint_MQ_Configuration" destination="${MQ}" doc:name="Anypoint MQ"/>
+                <flow-ref name="sendto-receive-flow" doc:name="sendto-receive-flow"/>
+
+            </when>
+            <otherwise>
+                <logger message="retry count exhausted" level="INFO" doc:name="Logger"/>
+            </otherwise>
+        </choice>
+    </flow>
+    <flow name="performance-test-launcherFlow">
+        <http:listener config-ref="HTTP_Listener_Configuration" path="/runtest" allowedMethods="GET" doc:name="HTTP"/>
+        <set-payload value="#[Thread.currentThread().getContextClassLoader().getResourceAsStream(message.inboundProperties.'originalFileName')]" doc:name="Set Payload"/>
+        <byte-array-to-string-transformer doc:name="Byte Array to String"/>
+        <copy-properties propertyName="*"  doc:name="Property"/>
+        <logger message="#['before queue']" level="INFO" doc:name="Logger"/>
+        <set-property propertyName="#['content-type']" value="#['application/text']" doc:name="Property"/>
+        <set-variable variableName="startTime" value="#[server.dateTime]" doc:name="Variable"/>
+        <async doc:name="Async">
+            <flow-ref name="sendto-receive-flow" doc:name="sendto-receive-flow"/>
+        </async>
+
+        <set-payload value="#['Message sent to queue at '+flowVars.startTime]" doc:name="Set Payload"/>
+
+    </flow>
+</mule>
